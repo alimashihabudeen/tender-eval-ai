@@ -17,7 +17,6 @@ st.set_page_config(page_title="Tender Evaluation Bot", page_icon="🤖")
 # API Gateway URL for your Lambda function
 LAMBDA_API_URL = "https://9d859kfrp7.execute-api.us-east-1.amazonaws.com/dev/ask"
 
-render_sidebar()
 
 # ------------------------------------------------------
 # Pydantic data model for Citations
@@ -66,7 +65,7 @@ def call_lambda(question, history):
 
     try:
         # Make POST request to Lambda API
-        response = requests.post(LAMBDA_API_URL, json=payload, headers=headers)
+        response = requests.post(LAMBDA_API_URL, json=payload, headers=headers,timeout=500)
         response.raise_for_status()
 
         # Print the raw response for debugging
@@ -113,7 +112,9 @@ def simulate_streaming_response(full_response, placeholder):
 
 # Sidebar: Streaming toggle and History Logs
 with st.sidebar:
-    streaming_on = st.checkbox('Streaming')
+    render_sidebar()
+    #streaming_on = st.checkbox('Streaming')
+    streaming_on ="T"
     st.button('Clear Chat History', on_click=clear_chat_history)
     
     # Display the conversation history logs as structured JSON-like objects
@@ -173,10 +174,11 @@ if not st.session_state.conversation_started:
             context_data = response.get("context", [])
 
             # Handle streaming mode
-            if streaming_on:
+            if streaming_on=="T":
                 with st.chat_message("assistant"):
                     placeholder = st.empty()
                     simulate_streaming_response(full_response, placeholder)
+                    display_citations(context_data)
             else:
                 # Non-streaming mode: Display the full response at once
                 with st.chat_message("assistant"):
@@ -186,17 +188,19 @@ if not st.session_state.conversation_started:
             st.session_state.messages.append({"role": "assistant", "content": full_response})
 
             # Display citations
-            display_citations(context_data)
+            #display_citations(context_data)
 
         else:
             st.error("Failed to retrieve response from Lambda.")
 
         # Mark conversation as started
         st.session_state.conversation_started = True
+       
 
 # Chat Input - User Prompt
 if prompt := st.chat_input():
     # Add user message to session state
+    st.rerun()
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
@@ -212,10 +216,11 @@ if prompt := st.chat_input():
         full_response = response.get("response", "No response")
         context_data = response.get("context", [])
 
-        if streaming_on:
+        if streaming_on=="T":
             with st.chat_message("assistant"):
                 placeholder = st.empty()
                 simulate_streaming_response(full_response, placeholder)
+                display_citations(context_data)
         else:
             with st.chat_message("assistant"):
                 st.write(full_response)
@@ -224,7 +229,8 @@ if prompt := st.chat_input():
         st.session_state.messages.append({"role": "assistant", "content": full_response})
 
         # Display citations
-        display_citations(context_data)
+        #display_citations(context_data)
 
     # Mark conversation as started if not already
     st.session_state.conversation_started = True
+    
