@@ -36,7 +36,7 @@ def render_sidebar():
     tender_eval_folder = 'eval-doc-files/'  # Folder for Tender Evaluation Documents
     prompt_folder_name = 'prompt-files/'
     st.sidebar.title("Tender Evaluation GenAI POC 📊✍⚖️📝🔍") 
-    #st.sidebar.header("Upload Evaluation Documents")
+    st.sidebar.header("Upload Tenderer Specifications")
 
     def list_s3_files(folder):
         try:
@@ -116,7 +116,7 @@ def render_sidebar():
         try:
             s3_client.upload_fileobj(document, bucket_name, s3_file_path)
             st.success(f"Successfully uploaded the file to `{s3_file_path}`!")
-            st.rerun()  # Rerun the app to reflect the changes
+            #st.rerun()  # Rerun the app to reflect the changes
         except Exception as e:
             st.error(f"Error: {str(e)}")
             
@@ -216,7 +216,7 @@ def render_sidebar():
     # Create the expander for Evaluation Criteria
     with st.expander("Step 1:Upload Evaluation Documents", expanded=False):
         #st.write("Note: Previous version of the evaluation criteria will be replaced.")
-        uploaded_file = st.file_uploader("Note: Previous version of the evaluation criteria will be replaced.", type=None, key="tender_eval_file_uploader_unique_key")
+        uploaded_file = st.file_uploader("Evaluation Documents", type=None, key="tender_eval_file_uploader_unique_key")
 
         # If a file is uploaded, save it in the prompt folder
         if uploaded_file:

@@ -1,14 +1,20 @@
 import json
 import boto3
-from typing import List, Dict
-from operator import itemgetter  # Import itemgetter for extracting dictionary keys
+import os
+from typing import List, Dict, Any
+from operator import itemgetter
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableParallel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_aws import ChatBedrock, AmazonKnowledgeBasesRetriever
+from botocore.config import Config
 
 # Amazon Bedrock client setup
-bedrock_runtime = boto3.client('bedrock-runtime', region_name="us-east-1")
+config = Config(
+     connect_timeout=5000,
+     read_timeout=5000,
+)
+bedrock_runtime = boto3.client(service_name='bedrock-runtime', region_name="us-east-1", config=config)
 s3_client = boto3.client('s3')  # S3 client to fetch context from S3 bucket
 
 # Define the S3 bucket and object key for the evaluation criteria file
@@ -26,60 +32,76 @@ def read_s3_file(bucket_name, object_key):
         return content
     except Exception as e:
         raise Exception(f"Error reading S3 file: {str(e)}")
-# Fetch the evaluation criteria from S3
+
+# Fetch evaluation criteria from S3 to use as a guiding context for the prompt
 evaluation_criteria = read_s3_file(bucket_name, object_key)
-template = "'''"+evaluation_criteria+"'''"  
 
-# Define Bedrock model and configuration
-model_id = "anthropic.claude-3-haiku-20240307-v1:0"
-model_kwargs = {
-    "max_tokens": 2048,
-    "temperature": 0.9,
-    "top_k": 250,
-    "top_p": 1,
-    "stop_sequences": ["\n\nHuman"],
-}
+# Define the ChatPromptTemplate using from_template with evaluation criteria as the core context
+prompt = ChatPromptTemplate.from_template(
+    template="""
 
-# LangChain - Define the ChatPromptTemplate
-prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", "You are a helpful assistant. Answer the question based only on the following context:\n {context}"+template),
-        MessagesPlaceholder(variable_name="history"),
-        ("human", "{question}")
-    ]
+Evaluation Criteria:
+{evaluation_criteria}
+
+Context from Knowledge Base:
+{context}
+
+Previous Conversation:
+{history}
+
+Question:
+{question}
+"""
 )
-
+# Define the ChatPromptTemplate using from_message with evaluation criteria as the core context
+# prompt = ChatPromptTemplate.from_messages(
+#     messages=[
+#         ("system", "You are a helpful assistant. Answer the question based only on the following context:\n{context}\nEvaluation Criteria:\n{evaluation_criteria}"),
+#         MessagesPlaceholder(variable_name="history"),  # Placeholder for chat history
+#         ("human", "{question}")
+#     ]
+# )
 # Amazon Bedrock - KnowledgeBase Retriever
 retriever = AmazonKnowledgeBasesRetriever(
-    knowledge_base_id="FYNKYVWUPB",  # Your KnowledgeBase ID
-    retrieval_config={"vectorSearchConfiguration": {"numberOfResults": 4}},
+    knowledge_base_id= os.environ['KNOWLEDGEBASEID'],#"9FGP6FQHXN",  # Your KnowledgeBase ID
+    retrieval_config={"vectorSearchConfiguration": {"numberOfResults": 12}},
 )
+
+# Bedrock model configuration
+#model_id = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+model_id = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+model_kwargs = {
+    "max_tokens": 4096,
+    "temperature": 0,
+    "top_k": 250,
+    "top_p": 0,
+    "stop_sequences": ["\n\nHuman"],
+}
 
 # Bedrock Chat Model
 model = ChatBedrock(
     client=bedrock_runtime,
     model_id=model_id,
     model_kwargs=model_kwargs,
+    beta_use_converse_api=True,
 )
 
-# Combine the retriever and model into a LangChain execution chain using itemgetter
-chain = (
-    RunnableParallel({
-        "context": itemgetter("question") | retriever,  # Use itemgetter for extracting 'question' to pass into retriever
-        "question": itemgetter("question"),  # Extract 'question' for prompt
-        "history": itemgetter("history"),  # Extract 'history' if available
-    })
-    .assign(response=prompt | model | StrOutputParser())  # Generate response from the model
-)
+# Combine the retriever and model into a LangChain execution chain
+chain = RunnableParallel({
+    "context": itemgetter("question") | retriever,  # Retrieve Knowledge Base context based on the question
+    "evaluation_criteria": lambda _: evaluation_criteria,  # Pass evaluation criteria as core guiding context
+    "question": itemgetter("question"),
+    "history": itemgetter("history")  # Include conversation history
+}).assign(response=prompt | model | StrOutputParser())  # Generate response based on evaluation criteria, history, and Knowledge Base
 
 # Function to invoke the chain and handle Document objects
 def query_bedrock(question, history):
-    inputs = {"question": question, "history": history}
-    
-    # Ensure that the question is a string before passing it through
-    if isinstance(question, dict):
-        # Convert the dictionary to a string
-        question = json.dumps(question)
+    inputs = {
+        "question": question,
+        "history": history,  # Pass in chat history to maintain context
+        #"context": "",  # Will be dynamically retrieved based on the question
+        "evaluation_criteria": evaluation_criteria  # Pass evaluation criteria as the primary guiding context
+    }
     
     # Run the LangChain pipeline
     output = chain.invoke(inputs)
@@ -93,7 +115,7 @@ def query_bedrock(question, history):
             "page_content": doc.page_content,
             "metadata": doc.metadata
         }
-        for doc in output['context']
+        for doc in output.get('context', [])
     ]
     
     return response, context_data
@@ -109,7 +131,7 @@ def lambda_handler(event, context):
         if not isinstance(question, str):
             question = json.dumps(question)
 
-        # Invoke Bedrock and LangChain
+        # Invoke Bedrock and LangChain with the question and history
         response, context_data = query_bedrock(question, history)
 
         # Return the response and context

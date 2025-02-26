@@ -116,7 +116,7 @@ def display_citations(context_data):
 # Evaluate button and response handling
 if not st.session_state.conversation_started:
     if st.button('🔎 Evaluate and Summarise Tenderer Documents', help='Click to summarise the tenderer documents'):
-        user_message = "Generate a review and evaluation report of the Tenderer's proposal."
+        user_message = "Generate a review and evaluation report of the Tenderer's proposal."#"Generate a review and evaluation report of the Tenderer's proposal. Provide recommendation with justification."
         st.session_state.messages.append({"role": "user", "content": user_message})
         with st.chat_message("user"):
             st.write(user_message)
